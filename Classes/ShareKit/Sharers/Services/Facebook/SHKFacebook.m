@@ -384,7 +384,8 @@ static SHKFacebook *requestingPermisSHKFacebook=nil;
 		item.shareType == SHKShareTypeUserInfo)					// sharekit doesn't use this, I don't know who does
     {
 		// Ask for publish_actions permissions in context
-		if ([FBSession.activeSession.permissions
+		if (item.shareType != SHKShareTypeUserInfo &&
+		    [FBSession.activeSession.permissions
 			 indexOfObject:@"publish_actions"] == NSNotFound) {	// we need at least this.SHKCONFIG(facebookWritePermissions
 			// No permissions found in session, ask for it
 			[self saveItemForLater:SHKPendingSend];
