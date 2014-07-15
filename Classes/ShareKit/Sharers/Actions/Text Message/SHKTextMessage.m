@@ -32,9 +32,10 @@
 
 #pragma mark -
 #pragma mark Configuration : Service Defination
-+(BOOL)composerSupportsAttachment
+
++ (BOOL)composerSupportsAttachment
 {
-	return [[MFMessageComposeViewController class] respondsToSelector:@selector(canSendAttachments) ];
+	return [[MFMessageComposeViewController class] respondsToSelector:@selector(canSendAttachments)];
 }
 
 + (NSString *)sharerTitle
@@ -58,8 +59,9 @@
 }
 
 + (BOOL)canShareFile:(SHKFile *)file {
-    if([self composerSupportsAttachment] && [MFMessageComposeViewController canSendAttachments]){
-		// there is probably some number that we should limit attachments to, for the moment just say ok.
+    
+    if ([self composerSupportsAttachment] && [MFMessageComposeViewController canSendAttachments] && [MFMessageComposeViewController isSupportedAttachmentUTI:file.UTIType]) {
+
 		return YES;
 	}
 	return NO;
@@ -75,7 +77,6 @@
 	return NO;
 }
 
-
 #pragma mark -
 #pragma mark Configuration : Dynamic Enable
 
@@ -83,13 +84,6 @@
 {
 	return [MFMessageComposeViewController canSendText];
 }
-
-- (BOOL)shouldAutoShare
-{
-	return YES;
-}
-
-
 
 #pragma mark -
 #pragma mark Share API Methods
@@ -110,24 +104,20 @@
 	composeView.messageComposeDelegate = self;
 	
 	NSString *body = self.item.text;
-	
-	if (!body) {
-		
-		if (self.item.URL != nil)
-		{
-			NSString *urlStr = [self.item.URL.absoluteString stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-			
-			if (body != nil)
-				body = [body stringByAppendingFormat:@"<br/><br/>%@", urlStr];
-			
-			else
-				body = urlStr;
-		}
-		
-		// fallback
-		if (body == nil)
-			body = @"";
-	}
+    
+    if (self.item.URL) {
+        NSString *urlStr = [self.item.URL.absoluteString stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        body = [self appendText:urlStr toBody:body];
+    }
+    
+    if (self.item.title) {
+        body = [self appendText:self.item.title toBody:body];
+    }
+    
+    // fallback
+    if (body == nil)
+        body = @"";
+
 	[composeView setBody:body];
 	
 	NSArray *toRecipients = self.item.textMessageToRecipients;
@@ -147,6 +137,17 @@
     [[SHK currentHelper] keepSharerReference:self]; //release is in callback, MFMessageComposeViewController does not retain its delegate
 	
 	return YES;
+}
+
+- (NSString *)appendText:(NSString *)string toBody:(NSString *)body {
+    
+    NSString *result = nil;
+    if (body) {
+        result = [body stringByAppendingFormat:@"<br/><br/>%@", string];
+    } else {
+        result = string;
+    }
+    return result;
 }
 
 - (void)messageComposeViewController:(MFMessageComposeViewController *)controller
@@ -169,6 +170,5 @@
     [[SHK currentHelper] hideCurrentViewControllerAnimated:YES];
     [[SHK currentHelper] removeSharerReference:self]; //retained in [self sendText] method
 }
-
 
 @end

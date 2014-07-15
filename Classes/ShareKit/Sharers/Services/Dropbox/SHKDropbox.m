@@ -8,12 +8,13 @@
 
 #import "SHKDropbox.h"
 #import "SharersCommonHeaders.h"
+#import "SHKUploadInfo.h"
 
 ///Where user starts to browse the save location
 #define kSHKDropboxStartDirectory @"/"
 
 #define kDropboxMaxFileSize 150000000
-#define kSHKDropboxSizeChunks 104800
+#define kSHKDropboxSizeChunks 2097152 //this is the default size of Dropbox ios sdk made chunks.
 #define kDropboxErrorDomain @"dropbox.com"
 #define kDropboxDomain @"www.dropbox.com"
 #define kDropboxResourseDomain  @"dl.dropbox.com"
@@ -31,6 +32,7 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 @property (nonatomic, strong) DBRestClient *restClient;
 @property (nonatomic, strong) UIAlertView *overwriteAlert;
 @property (nonatomic) BOOL fileOverwriteChecked;
+@property BOOL chunkedUploadFailReportedAlready;
 
 + (DBSession *) createNewDropbox;
 + (DBSession *) dropbox;
@@ -226,6 +228,17 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
     }
 }
 
+#pragma mark - Share
+
+- (void)share {
+    
+    if (self.item.shareType == SHKShareTypeImage && !self.item.file) {
+        [self.item convertImageShareToFileShareOfType:SHKImageConversionTypePNG quality:0];
+    }
+    
+    [super share];
+}
+
 #pragma mark - UI
 
 - (NSArray *)shareFormFieldsForType:(SHKShareType)type {
@@ -257,6 +270,7 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 - (void)SHKFormOptionControllerEnumerateOptions:(SHKFormOptionController *)optionController {
     
 	self.curOptionController = optionController;
+    [self displayActivity:SHKLocalizedString(@"Loading...")];
     
     if (optionController.selectionValue) {
         [self.restClient loadMetadata:optionController.selectionValue];
@@ -268,6 +282,7 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 
 - (void)SHKFormOptionControllerCancelEnumerateOptions:(SHKFormOptionController *)optionController {
     
+    [self hideActivityIndicator];
     //TODO: cancel metadata load (directory browse) request. Dropbox SDK allows only to cancel all requests. It can happen, that there are more requests, possibly uploads, in progress and we do not want to stop these. Implement this, after Dropbox SDK exposes running requests.
 }
 
@@ -291,8 +306,7 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 - (void)checkFileOverwriteDestinationDir:(NSString *)destinationDir {
     
     // Display an activity indicator
-    if (!self.quiet)
-        [[SHKActivityIndicator currentIndicator] displayActivity:SHKLocalizedString(@"Connecting...")];
+    [self displayActivity:SHKLocalizedString(@"Connecting...")];
     
     NSString *dropboxFileName = [self.item.file.filename normalizedDropboxPath];
     [self.item setCustomValue:dropboxFileName forKey:kSHKDropboxStoredFileName];
@@ -323,7 +337,7 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 
 - (void)restClient:(DBRestClient*)client loadedMetadata:(DBMetadata*)metadata {
     
-    [[SHKActivityIndicator currentIndicator] hide];
+    [self hideActivityIndicator];
     
     if (metadata && metadata.path.length > 0) {
         
@@ -372,7 +386,7 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 
 - (void)restClient:(DBRestClient*)client loadMetadataFailedWithError:(NSError*)error {
 
-    [[SHKActivityIndicator currentIndicator] hide];
+    [self hideActivityIndicator];
     
     if ([error.domain isEqualToString:kDropboxErrorDomain] == YES && error.code == 404) {
         [self startSharing];
@@ -386,11 +400,6 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
 
 - (BOOL)send
 {
-	if (self.item.shareType == SHKShareTypeImage) {
-        
-        [self.item convertImageShareToFileShareOfType:SHKImageConversionTypePNG quality:0];
-    }
-    
     if (![self validateItem]) return NO;
 
     if (self.item.shareType == SHKShareTypeFile) {
@@ -427,6 +436,19 @@ static NSString *const kSHKDropboxDestinationDirKeyName = @"kSHKDropboxDestinati
     }
 	
 	return NO;
+}
+
+- (void)cancel {
+    
+    NSMutableSet *requests = [self.restClient valueForKey:@"requests"];
+    for (DBRequest *request in requests) {
+        if ([[request.sourcePath lastPathComponent] isEqualToString:self.item.file.filename]) {
+            [request cancel];
+            break;
+        }
+    }
+    [self sendDidCancel];
+    [[SHK currentHelper] removeSharerReference:self];
 }
 
 #pragma mark - DBRestClientDelegate methods (loadAccountInfo)
@@ -535,8 +557,14 @@ static int outstandingRequests = 0;
 
 - (void)restClient:(DBRestClient*)client uploadProgress:(CGFloat)progress
            forFile:(NSString*)destPath from:(NSString*)srcPath {
-//    SHKLog(@"%@ %@ %@ upload progress = %.2f %", [client description], destPath,srcPath, progress * 100);
+    //SHKLog(@"%@ %@ %@ upload progress = %.2f %", [client description], destPath,srcPath, progress);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     [[NSNotificationCenter defaultCenter] postNotificationName:kSHKDropboxUploadProgress object:[NSNumber numberWithFloat:progress]];
+#pragma clang diagnostic pop
+
+    int64_t uploadedBytes = self.item.file.size * progress;
+    [self showUploadedBytes:uploadedBytes totalBytes:self.item.file.size];
 }
 
 - (void)restClient:(DBRestClient*)client uploadFileFailedWithError:(NSError*)error {
@@ -549,6 +577,7 @@ static int outstandingRequests = 0;
 - (void)restClient:(DBRestClient *)client uploadedFileChunk:(NSString *)uploadId newOffset:(unsigned long long)offset
           fromFile:(NSString *)localPath expires:(NSDate *)expiresDate {
     
+    //SHKLog(@"%@ new offset %.2llu progress %llu", [client description], offset, offset/__fileSize);
     __fileOffset = offset;
     if (__fileOffset < __fileSize) {
         [client uploadFileChunk:uploadId offset:__fileOffset fromPath:localPath];
@@ -569,9 +598,24 @@ static int outstandingRequests = 0;
     }
 }
 
+- (void)restClient:(DBRestClient *)client uploadFileChunkProgress:(CGFloat)progress
+           forFile:(NSString *)uploadId offset:(unsigned long long)offset fromPath:(NSString *)localPath {
+    
+    unsigned long long chunkUploadedBytes = kSHKDropboxSizeChunks * progress;
+    unsigned long long totalUploadedBytes = chunkUploadedBytes + offset;
+    //SHKLog(@"%@ upload chunk progress = %.2f %", [client description], progress);
+    [self showUploadedBytes:totalUploadedBytes totalBytes:__fileSize];
+}
+
 - (void)restClient:(DBRestClient *)client uploadFileChunkFailedWithError:(NSError *)error {
    
-    [self checkDropboxAPIError:error];
+    //this method is called more than once (a bug in the sdk?). Error checking should happen only once.
+    if (!self.chunkedUploadFailReportedAlready) {
+        
+        //must be delayed, otherwise premature sharer's dealloc.
+        [self performSelector:@selector(checkDropboxAPIError:) withObject:error afterDelay:0.1];
+        self.chunkedUploadFailReportedAlready = YES;
+    }
 }
 
 - (void)restClient:(DBRestClient *)client uploadedFile:(NSString *)destPath fromUploadId:(NSString *)uploadId
