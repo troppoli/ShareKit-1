@@ -203,14 +203,37 @@ NSString * const kSHKTumblrUserInfo = @"kSHKTumblrUserInfo";
 
 #pragma mark -
 #pragma mark Implementation
+-(BOOL) blogIsValid
+{
+    NSString *blog = [self.item customValueForKey:@"blog"];
+    return nil != blog && ![blog isEqualToString:@""] && ![blog isEqualToString:@"-1"];
+}
+
+- (FormControllerCallback)shareFormValidate
+{
+    __weak typeof(self) weakSelf = self;
+    FormControllerCallback result = ^(SHKFormController *form) {
+		[weakSelf updateItemWithForm:form];
+        if(weakSelf && [weakSelf blogIsValid]){
+			[form saveForm];
+		}else{
+			[[[UIAlertView alloc] initWithTitle:SHKLocalizedString(@"Missing Fields")
+										message:SHKLocalizedString(@"Please select the blog to post to.")
+									   delegate:nil
+							  cancelButtonTitle:SHKLocalizedString(@"Close")
+							  otherButtonTitles:nil] show];
+		}
+			
+    };
+    return result;
+}
+
 
 - (BOOL)validateItem
 {
     if (self.item.shareType == SHKShareTypeUserInfo) return [super validateItem];
 	
-    NSString *blog = [self.item customValueForKey:@"blog"];
-    BOOL isBlogFilled = ![blog isEqualToString:@""] && ![blog isEqualToString:@"-1"];
-    BOOL itemValid = isBlogFilled && [super validateItem];
+    BOOL itemValid = [self blogIsValid] && [super validateItem];
     
 	return itemValid;
 }

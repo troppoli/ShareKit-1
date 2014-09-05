@@ -37,12 +37,6 @@ static NSString *const kSHKStoredItemKey=@"kSHKStoredItem";
 static NSString *const kSHKStoredActionKey=@"kSHKStoredAction";
 static NSString *const kSHKStoredShareInfoKey=@"kSHKStoredShareInfo";
 
-@interface SHKSharer ()
-
-- (void)updateItemWithForm:(SHKFormController *)form;
-
-@end
-
 @implementation SHKSharer
 
 - (void)dealloc {
