@@ -141,12 +141,11 @@
 
 - (NSString *)appendText:(NSString *)string toBody:(NSString *)body {
     
-	BOOL isHTML = self.item.isMailHTML;
-	NSString *separator = (isHTML ? @"<br/><br/>" : @"\n\n");
-
-	NSString *result = nil;
+    NSString *result = nil;
     if (body) {
-        result = [body stringByAppendingFormat:@"%@%@",separator, string];
+        const BOOL isHTML = self.item.isHTMLText;
+        NSString * const separator = (isHTML ? @"<br/><br/>" : @"\n\n");
+        result = [body stringByAppendingFormat:@"%@%@", separator, string];
     } else {
         result = string;
     }
